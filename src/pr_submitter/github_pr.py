@@ -2,6 +2,7 @@ import os
 import re
 import json
 import time
+import logging
 import hashlib
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
@@ -18,6 +19,7 @@ class PRCreationResult:
     pr_number: Optional[int] = None
     branch_name: str = ""
     error_message: str = ""
+    error_step: str = ""
     commit_sha: Optional[str] = None
 
 
@@ -44,29 +46,84 @@ class GitHubPRSubmitter:
         result = PRCreationResult()
         
         try:
+            logger = logging.getLogger(__name__)
+            
+            logger.info(f"[PR Submitter] Step 1: Generating branch name...")
             branch_name = self._generate_branch_name(patches, error_summary)
             result.branch_name = branch_name
+            logger.info(f"[PR Submitter] Branch name: {branch_name}")
             
-            self._create_branch(branch_name, base_branch)
-            self._apply_patches(patches)
-            commit_sha = self._commit_changes(patches, error_summary)
-            result.commit_sha = commit_sha
+            logger.info(f"[PR Submitter] Step 2: Creating local branch '{branch_name}' from '{base_branch}'...")
+            try:
+                self._create_branch(branch_name, base_branch)
+            except Exception as e:
+                result.success = False
+                result.error_step = "create_branch"
+                result.error_message = f"Failed to create local branch: {str(e)}"
+                logger.error(f"[PR Submitter] ❌ {result.error_message}")
+                return result
             
+            logger.info(f"[PR Submitter] Step 3: Applying {len(patches)} patches...")
+            try:
+                self._apply_patches(patches)
+            except Exception as e:
+                result.success = False
+                result.error_step = "apply_patches"
+                result.error_message = f"Failed to apply patches: {str(e)}"
+                logger.error(f"[PR Submitter] ❌ {result.error_message}")
+                return result
+            
+            logger.info(f"[PR Submitter] Step 4: Committing changes...")
+            try:
+                commit_sha = self._commit_changes(patches, error_summary)
+                result.commit_sha = commit_sha
+                logger.info(f"[PR Submitter] Committed as: {commit_sha[:8]}")
+            except Exception as e:
+                result.success = False
+                result.error_step = "commit_changes"
+                result.error_message = f"Failed to commit changes: {str(e)}"
+                logger.error(f"[PR Submitter] ❌ {result.error_message}")
+                return result
+            
+            logger.info(f"[PR Submitter] Step 5: Pushing branch '{branch_name}' to remote...")
+            try:
+                self._push_branch(branch_name)
+            except Exception as e:
+                result.success = False
+                result.error_step = "push_branch"
+                result.error_message = f"Failed to push branch to remote: {str(e)}"
+                logger.error(f"[PR Submitter] ❌ {result.error_message}")
+                return result
+            logger.info(f"[PR Submitter] ✅ Branch pushed successfully")
+            
+            logger.info(f"[PR Submitter] Step 6: Generating PR description...")
             pr_desc = self._generate_pr_description(
                 patches, security_result, compatibility_report, test_result, error_summary
             )
             
-            pr_number, pr_url = self._create_pull_request(
-                pr_desc.title, pr_desc.body, branch_name, base_branch, pr_desc.labels
-            )
+            logger.info(f"[PR Submitter] Step 7: Creating Pull Request via GitHub API...")
+            try:
+                pr_number, pr_url = self._create_pull_request(
+                    pr_desc.title, pr_desc.body, branch_name, base_branch, pr_desc.labels
+                )
+            except Exception as e:
+                result.success = False
+                result.error_step = "create_pr_api"
+                result.error_message = f"GitHub API failed to create PR: {str(e)}"
+                logger.error(f"[PR Submitter] ❌ {result.error_message}")
+                return result
             
             result.success = True
             result.pr_number = pr_number
             result.pr_url = pr_url
+            logger.info(f"[PR Submitter] ✅ PR created successfully: {pr_url}")
             
         except Exception as e:
             result.success = False
-            result.error_message = str(e)
+            result.error_step = "unknown"
+            result.error_message = f"Unexpected error: {str(e)}"
+            import logging
+            logging.getLogger(__name__).error(f"[PR Submitter] ❌ {result.error_message}", exc_info=True)
         
         return result
     
@@ -366,6 +423,9 @@ class GitHubPRSubmitter:
                               head_branch: str, base_branch: str,
                               labels: List[str]) -> tuple:
         import requests
+        import logging
+        
+        logger = logging.getLogger(__name__)
         
         url = f"{self._api_base}/repos/{self.repo}/pulls"
         
@@ -382,35 +442,103 @@ class GitHubPRSubmitter:
             "maintainer_can_modify": True,
         }
         
-        response = requests.post(url, headers=headers, json=data)
-        response.raise_for_status()
+        logger.debug(f"[PR Submitter] Sending PR creation request to {url}")
+        logger.debug(f"[PR Submitter] Title: {title}")
+        logger.debug(f"[PR Submitter] Head branch: {head_branch}, Base branch: {base_branch}")
         
-        pr_data = response.json()
-        pr_number = pr_data["number"]
-        pr_url = pr_data["html_url"]
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+        except requests.exceptions.Timeout:
+            raise Exception(f"Request timed out after 30 seconds")
+        except requests.exceptions.ConnectionError as e:
+            raise Exception(f"Connection error: {str(e)}")
+        
+        if response.status_code != 201:
+            error_detail = ""
+            try:
+                error_data = response.json()
+                error_detail = error_data.get("message", "")
+                if "errors" in error_data:
+                    error_detail += " - " + "; ".join([e.get("message", "") for e in error_data["errors"]])
+            except Exception:
+                error_detail = response.text[:500]
+            
+            status_errors = {
+                401: "Authentication failed - check your GITHUB_TOKEN",
+                403: "Permission denied - token may not have write access to repo",
+                404: "Repository not found or branch does not exist on remote",
+                422: "Validation failed - branch may already exist or PR already open",
+            }
+            
+            error_msg = status_errors.get(response.status_code, f"HTTP {response.status_code}")
+            if error_detail:
+                error_msg += f": {error_detail}"
+            
+            raise Exception(error_msg)
+        
+        try:
+            pr_data = response.json()
+            pr_number = pr_data["number"]
+            pr_url = pr_data["html_url"]
+        except Exception as e:
+            raise Exception(f"Failed to parse GitHub API response: {str(e)}")
         
         if labels:
-            self._add_labels(pr_number, labels)
-        
-        self._push_branch(head_branch)
+            try:
+                self._add_labels(pr_number, labels)
+            except Exception as e:
+                logger.warning(f"[PR Submitter] Could not add labels (non-critical): {e}")
         
         return pr_number, pr_url
     
     def _push_branch(self, branch_name: str) -> None:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.debug(f"[PR Submitter] Pushing branch '{branch_name}' to origin...")
+        
         try:
             import git
             repo = git.Repo(self.repo_path)
             origin = repo.remote("origin")
-            origin.push(branch_name)
+            
+            push_info = origin.push(branch_name)
+            
+            for info in push_info:
+                if info.flags & info.ERROR:
+                    raise Exception(f"Git push failed: {info.summary.strip()}")
+                elif info.flags & info.REJECTED:
+                    raise Exception(f"Git push rejected: {info.summary.strip()}")
+            
+            logger.debug(f"[PR Submitter] Git push completed successfully")
+            
         except ImportError:
             import subprocess
-            subprocess.run(
-                ["git", "push", "origin", branch_name],
-                cwd=self.repo_path,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            
+            try:
+                result = subprocess.run(
+                    ["git", "push", "origin", branch_name],
+                    cwd=self.repo_path,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr.strip() if e.stderr else "Unknown git push error"
+                
+                if "Permission denied" in error_msg or "403" in error_msg:
+                    raise Exception(f"Git push permission denied: {error_msg}")
+                elif "Repository not found" in error_msg or "404" in error_msg:
+                    raise Exception(f"Repository not found: {error_msg}")
+                elif "non-fast-forward" in error_msg or "rejected" in error_msg:
+                    raise Exception(f"Push rejected (non-fast-forward): {error_msg}")
+                elif "timeout" in error_msg.lower():
+                    raise Exception(f"Git push timed out: {error_msg}")
+                else:
+                    raise Exception(f"Git push failed: {error_msg}")
+            except subprocess.TimeoutExpired:
+                raise Exception("Git push timed out after 60 seconds")
     
     def _add_labels(self, pr_number: int, labels: List[str]) -> None:
         import requests

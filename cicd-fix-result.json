@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "pr_created": false,
+  "pr_url": null,
+  "errors_found": 0,
+  "patches_generated": 0,
+  "security_issues": 0,
+  "security_blocking": false,
+  "compatibility_issues": 0,
+  "compatibility_breaking": false,
+  "tests_passed": null,
+  "sandbox_blocked": false,
+  "blocked_reason": "",
+  "error_message": "",
+  "error_step": "",
+  "pr_push_failed": false,
+  "pr_create_failed": false
+}
