@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ci-cd-fix-bot"
+version = "0.1.0"
+description = "Automated CI/CD pipeline fix bot powered by LLM with AST analysis and RAG"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "CI/CD Fix Bot Team"},
+]
+
+[project.scripts]
+cicd-fix-bot = "src.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv"]
