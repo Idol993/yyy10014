@@ -1,8 +1,8 @@
 {
-  "success": true,
+  "success": false,
   "pr_created": false,
   "pr_url": null,
-  "errors_found": 0,
+  "errors_found": 2,
   "patches_generated": 0,
   "security_issues": 0,
   "security_blocking": false,
@@ -11,7 +11,7 @@
   "tests_passed": null,
   "sandbox_blocked": false,
   "blocked_reason": "",
-  "error_message": "",
+  "error_message": "Could not generate any valid patches",
   "error_step": "",
   "pr_push_failed": false,
   "pr_create_failed": false

@@ -238,18 +238,27 @@ class CICDFixBot:
                 
                 if self.config.enable_test_run:
                     logger.info("Step 5c: Running tests (on patched code)...")
-                    temp_runner = TestRunner(
-                        repo_path=temp_dir,
-                        timeout=self.config.sandbox_timeout,
-                    )
-                    changed_files = list(set(p.file_path for p in all_patches))
-                    test_result = temp_runner.run_relevant_tests(changed_files)
-                    result.tests_passed = test_result.all_passed
-                    
-                    if test_result.all_passed:
-                        logger.info(f"✅ All tests passed ({test_result.passed}/{test_result.total_tests}).")
-                    else:
-                        logger.error(f"❌ TESTS FAILED - Only {test_result.passed}/{test_result.total_tests} tests passed")
+                    try:
+                        temp_runner = TestRunner(
+                            repo_path=temp_dir,
+                            timeout=self.config.sandbox_timeout,
+                        )
+                        changed_files = list(set(p.file_path for p in all_patches))
+                        test_result = temp_runner.run_relevant_tests(changed_files)
+                        result.tests_passed = test_result.all_passed
+                        
+                        if test_result.all_passed:
+                            logger.info(f"✅ All tests passed ({test_result.passed}/{test_result.total_tests}).")
+                        else:
+                            logger.error(f"❌ TESTS FAILED - Only {test_result.passed}/{test_result.total_tests} tests passed")
+                    except Exception as e:
+                        test_result = TestResult()
+                        test_result.failed = 1
+                        test_result.errors = 1
+                        test_result.total_tests = 1
+                        test_result.output = f"Test runner crashed: {e}"
+                        result.tests_passed = False
+                        logger.error(f"❌ Test runner exception: {e}")
                 
                 blocked_reasons = []
                 if result.security_blocking:

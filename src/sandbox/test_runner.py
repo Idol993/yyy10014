@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import tempfile
 import shutil
@@ -107,13 +108,20 @@ class TestRunner:
             result.total_duration = time.time() - start_time
             result.output = proc.stdout + proc.stderr
             
-            result = self._parse_pytest_output(proc.stdout, result)
+            try:
+                result = self._parse_pytest_output(proc.stdout, result)
+            except Exception as e:
+                result.errors = 1
+                result.output += f"\nTest output parsing error: {e}"
             
         except subprocess.TimeoutExpired:
             result.errors = 1
             result.output = f"Test execution timed out after {self.timeout} seconds"
         except FileNotFoundError:
             result = self._run_python_unittest(test_files)
+        except Exception as e:
+            result.errors = 1
+            result.output = f"Test execution error: {e}"
         
         return result
     
@@ -195,13 +203,14 @@ class TestRunner:
             
             result.output = proc.stdout + proc.stderr
             
-            result.total_tests = len(re.findall(r'^test_', result.output, re.MULTILINE))
-            result.passed = result.total_tests - result.failed - result.errors
-            
             if proc.returncode != 0:
                 result.failed = len(re.findall(r'FAIL:', result.output))
                 result.errors = len(re.findall(r'ERROR:', result.output))
-                result.passed = result.total_tests - result.failed - result.errors
+            
+            result.total_tests = len(re.findall(r'^test_', result.output, re.MULTILINE))
+            if result.total_tests == 0:
+                result.total_tests = result.failed + result.errors
+            result.passed = max(0, result.total_tests - result.failed - result.errors)
             
         except Exception as e:
             result.errors = 1

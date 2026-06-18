@@ -131,7 +131,8 @@ class DocumentRetriever:
                     line = ''
                 lines.append(line)
             
-            doc_text = f"Function/Class: {name}\n\nDocumentation:\n{'\n'.join(lines)}"
+            joined_lines = "\n".join(lines)
+            doc_text = f"Function/Class: {name}\n\nDocumentation:\n{joined_lines}"
             
             documents.append(Document(
                 content=doc_text,
@@ -163,7 +164,8 @@ class DocumentRetriever:
                     line = ''
                 lines.append(line)
             
-            doc_text = f"Class/Interface: {name}\n\nJavadoc:\n{'\n'.join(lines)}"
+            joined_lines = "\n".join(lines)
+            doc_text = f"Class/Interface: {name}\n\nJavadoc:\n{joined_lines}"
             
             documents.append(Document(
                 content=doc_text,
